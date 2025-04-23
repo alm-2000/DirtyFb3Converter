@@ -94,6 +94,8 @@ public class DirtyFb3Converter {
     protected static final String TAG_COVERPAGE  = "coverpage";
     protected static final String TAG_RELATIONSHIPS  = "Relationships";
     protected static final String TAG_RELATIONSHIP  = "Relationship";
+    protected static final String TAG_SUBSCRIPTION  = "subscription";
+    protected static final String TAG_TEXT_AUTHOR  = "text-author";
 
 
     protected static final String ATTR_NAME_XMLNS = "xmlns";
@@ -134,9 +136,9 @@ public class DirtyFb3Converter {
     protected static HashMap<String, String> imagesMap     = new HashMap<>();
     protected static HashMap<String, String> imagesExtMap  = new HashMap<>();
     protected static HashMap<String, Boolean> imagesUsedMap = new HashMap<>();
-
-
     protected static DocumentBuilderFactory xmlFactory;
+
+
     public static void main(String[] args) {
         String inputDir = null;
         String outputFile = null;
@@ -297,7 +299,7 @@ public class DirtyFb3Converter {
         NodeList childNodes = fb2RootElement.getChildNodes();
         String fromTag = null, toTag = null;
         if (childNodes.getLength() > 0) {
-           for(int numOfReplaceTag = 0; numOfReplaceTag <= 7 ;numOfReplaceTag++){
+           for(int numOfReplaceTag = 0; numOfReplaceTag <= 8 ;numOfReplaceTag++){
              try {               
                switch (numOfReplaceTag) {
                case 0:
@@ -331,6 +333,10 @@ public class DirtyFb3Converter {
                case 7:
                  fromTag = TAG_NOTES;
                  toTag   = TAG_FB2_BODY;
+                 break;
+               case 8:
+                 fromTag = TAG_SUBSCRIPTION;
+                 toTag   = TAG_TEXT_AUTHOR;
                  break;
 
                default: ;
@@ -401,7 +407,7 @@ public class DirtyFb3Converter {
                     }else if(fromTag.equals(TAG_NOTES)){
                       toTagElement.setAttribute( ATTR_NAME_NAME,ATTR_VALUE_BODY_NAME_NOTES);
                       doAttrCopy = false;
-					  fromChildNodes = fromTagElement.getChildNodes();
+		      fromChildNodes = fromTagElement.getChildNodes();
                       while (fromChildNodes.getLength() > 0) {
                         child = fromChildNodes.item(0);
                         toTagElement.appendChild(child);
