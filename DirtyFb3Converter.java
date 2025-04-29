@@ -57,6 +57,7 @@ public class DirtyFb3Converter {
     protected static final String TAG_SECTION = "section";
     protected static final String TAG_CITE = "cite";    
     protected static final String TAG_DIV = "div";    
+    protected static final String TAG_BR = "br";    
     protected static final String TAG_EMPTY_LINE = "empty-line";    
     protected static final String TAG_BINARY = "binary";
     protected static final String TAG_TEXT = "#text";
@@ -94,7 +95,7 @@ public class DirtyFb3Converter {
     protected static final String TAG_COVERPAGE  = "coverpage";
     protected static final String TAG_RELATIONSHIPS  = "Relationships";
     protected static final String TAG_RELATIONSHIP  = "Relationship";
-    protected static final String TAG_SUBSCRIPTION  = "subscription";
+    protected static final String TAG_SUBSCRIPTION  = "subscription"; 
     protected static final String TAG_TEXT_AUTHOR  = "text-author";
 
 
@@ -299,7 +300,7 @@ public class DirtyFb3Converter {
         NodeList childNodes = fb2RootElement.getChildNodes();
         String fromTag = null, toTag = null;
         if (childNodes.getLength() > 0) {
-           for(int numOfReplaceTag = 0; numOfReplaceTag <= 8 ;numOfReplaceTag++){
+           for(int numOfReplaceTag = 0; numOfReplaceTag <= 9 ;numOfReplaceTag++){
              try {               
                switch (numOfReplaceTag) {
                case 0:
@@ -337,6 +338,10 @@ public class DirtyFb3Converter {
                case 8:
                  fromTag = TAG_SUBSCRIPTION;
                  toTag   = TAG_TEXT_AUTHOR;
+                 break;
+               case 9:
+                 fromTag = TAG_BR;
+                 toTag   = TAG_EMPTY_LINE;
                  break;
 
                default: ;
@@ -649,27 +654,29 @@ public class DirtyFb3Converter {
 //////////////////////////TAG_SEQUENCE
                               NodeList sequenceList = fb3DescriptionElement.getElementsByTagName(TAG_SEQUENCE);
                               if (sequenceList.getLength() > 0) {
-                                  Element sequenceElement = (Element) sequenceList.item(0);
-                                  NodeList titleList = sequenceElement.getElementsByTagName(TAG_TITLE);
+                                  for (int sequenceCount = 0; sequenceCount < sequenceList.getLength(); sequenceCount++) {
+                                      Element sequenceElement = (Element) sequenceList.item(sequenceCount);
+                                      NodeList titleList = sequenceElement.getElementsByTagName(TAG_TITLE);
                 
-                                  if (titleList.getLength() > 0) {
-                                      Element titleElement = (Element) titleList.item(0);
-                                      NodeList mainList = titleElement.getElementsByTagName(TAG_MAIN);
-                                      if (mainList.getLength() > 0) {
-                                            Element mainElement =  (Element) mainList.item(0);
-                                            Element newMainElement = document.createElement(TAG_SEQUENCE);
-                                            Attr attr = document.createAttribute(ATTR_NAME_NAME);
-                                            attr.setValue(mainElement.getTextContent());
-                                            newMainElement.setAttributeNode(attr);
-                                            String sequenceNumber =  sequenceElement.getAttribute(ATTR_NAME_NUMBER);
-                                            if(sequenceNumber != null && sequenceNumber.length() > 0){
-                                                attr = document.createAttribute(ATTR_NAME_NUMBER);
-                                                attr.setValue(sequenceNumber);
-                                                newMainElement.setAttributeNode(attr); 
-                                            }                    
-                                            titleInfoElement.appendChild(newMainElement); 
+                                      if (titleList.getLength() > 0) {
+                                          Element titleElement = (Element) titleList.item(0);
+                                          NodeList mainList = titleElement.getElementsByTagName(TAG_MAIN);
+                                          if (mainList.getLength() > 0) {
+                                                Element mainElement =  (Element) mainList.item(0);
+                                                Element newMainElement = document.createElement(TAG_SEQUENCE);
+                                                Attr attr = document.createAttribute(ATTR_NAME_NAME);
+                                                attr.setValue(mainElement.getTextContent());
+                                                newMainElement.setAttributeNode(attr);
+                                                String sequenceNumber =  sequenceElement.getAttribute(ATTR_NAME_NUMBER);
+                                                if(sequenceNumber != null && sequenceNumber.length() > 0){
+                                                    attr = document.createAttribute(ATTR_NAME_NUMBER);
+                                                    attr.setValue(sequenceNumber);
+                                                    newMainElement.setAttributeNode(attr); 
+                                                }                    
+                                                titleInfoElement.appendChild(newMainElement); 
                                          
-                                      }                               
+                                          }                               
+                                      }
                                   }
                               }
 
