@@ -3,7 +3,7 @@ DirtyFb3Converter is a small utility that allows you to convert books in fb3 for
 
 # Compilation
 ```
-javac DirtyFb3Converter.java
+make
 ```
 # Usage
 ```
