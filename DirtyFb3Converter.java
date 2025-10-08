@@ -22,11 +22,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.FileInputStream;
 import java.io.File;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;	
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import org.xml.sax.SAXException;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipEntry;
 
 public class DirtyFb3Converter {
     protected static final String CONTENT_TYPES_FILENAME ="[Content_Types].xml";
@@ -38,8 +43,8 @@ public class DirtyFb3Converter {
     protected static final String CONTENT_TYPE_CORE="application/vnd.openxmlformats-package.core-properties+xml";
     protected static final String CONTENT_TYPE_DESCRIPTION="application/fb3-description+xml";
     protected static final String CONTENT_TYPE_BODY="application/fb3-body+xml";
-    protected static final String DEFAULT_BODY_FILENAME = "/fb3/body.xml";
-    protected static final String DEFAULT_DESCRIPTION_FILENAME = "/fb3/description.xml";
+    protected static final String DEFAULT_BODY_FILENAME = "fb3/body.xml";
+    protected static final String DEFAULT_DESCRIPTION_FILENAME = "fb3/description.xml";
     protected static final String DEFAULT_COVER_FILE_ID = "default_cover_file_id" ;
     protected static final String TAG_FB3_BODY = "fb3-body";
     protected static final String TAG_FB2_ROOT = "FictionBook";
@@ -138,36 +143,46 @@ public class DirtyFb3Converter {
     protected static HashMap<String, String> imagesExtMap  = new HashMap<>();
     protected static HashMap<String, Boolean> imagesUsedMap = new HashMap<>();
     protected static DocumentBuilderFactory xmlFactory;
+    protected static VirtualFileSystem vfs = null;
 
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         String inputDir = null;
         String outputFile = null;
+        String inputPath = null;
 
         // Reading command line parameters
         for (String arg : args) {
             if (arg.startsWith("--unzipped_fb3_dir=")) {
-                inputDir = arg.split("=")[1];
+                inputPath = arg.split("=")[1];
+                vfs = new FileBasedVFS(new File(inputPath));
+            } else if (arg.startsWith("--fb3_file=")) {
+               inputPath = arg.split("=")[1]; 
+                try (InputStream fis = new FileInputStream(new File(inputPath))) {
+                   vfs = new ZipMemoryVFS(inputPath, fis);
+                }
+                inputPath = ""; // ZIP base path 
             } else if (arg.startsWith("--output=")) {
                 outputFile = arg.split("=")[1];  
             }
         }
         // Check that the parameters are set
-        if (inputDir == null || outputFile == null) {
-            System.err.println("Usage: java DirtyFb3Converter --unzipped_fb3_dir=[fb3_dir] --output=[saved_fb2]\n\n"+
+        if (vfs == null || outputFile == null) {
+            System.err.println("Usage: java DirtyFb3Converter --unzipped_fb3_dir=<fb3_dir>|--fb3_file=<zip> --output=<saved_fb2>\n\n"+
 			                   "--unzipped_fb3_dir - path to the unzipped book in fb3 format\n" +
+							   "--fb3_file - path to fb3 file (zipped fb3 dir)\n"+
 							   "--output - path where to save the completed fb2");
             return;
         }
 
         try { 
             xmlFactory = DocumentBuilderFactory.newInstance();
-            String inputPath = inputDir;
-            readDocumentProperty(inputPath);
+ 
+            readDocumentProperty();
             loadImages(relBodyFilename);
-            Document document = StartConvertFb3ToFb2(inputPath);
+            Document document = StartConvertFb3ToFb2();
 			if(document==null) return;
-            replaceFb3TagsIntoFb2(inputPath,document);
+            replaceFb3TagsIntoFb2(document);
             generateDescription(document);
             insertImagesContent(document);    
             System.out.println("Complete");             
@@ -180,21 +195,19 @@ public class DirtyFb3Converter {
                 transformer.transform(source, result);
 
         } catch (Exception e) {
-                System.out.println("Convertation Error");
+                System.out.println("Convertation Error" +e);
         }
  
     }
 //reading the structure of the fb3 document and filling in the main parameters to generate the output file	
-    public static void  readDocumentProperty(String inputPath) throws IOException, ParserConfigurationException,SAXException{
-            DocumentBuilder builder = xmlFactory.newDocumentBuilder();        
-            File xmlFile = new File(inputPath + "/" + RELS_DIR +"/"+RELS_EXTENSION);
-            Document doc = builder.parse(xmlFile);
+    public static void  readDocumentProperty() throws IOException, ParserConfigurationException,SAXException{
+
+			Document doc = parseDocumentFromPath(RELS_DIR +"/"+RELS_EXTENSION	);
  
-            doc.getDocumentElement().normalize();
+
             
 // Find the "Relationships" node
             NodeList relationships = doc.getElementsByTagName(TAG_RELATIONSHIPS);
-            
             if (relationships.getLength() > 0) {
                 // Get the contents of the "Relationships" node
                 Element relationshipsElement = (Element) relationships.item(0);
@@ -204,17 +217,16 @@ public class DirtyFb3Converter {
                 for (int i = 0; i < relationshipNodes.getLength(); i++) {
                     Element relationship = (Element) relationshipNodes.item(i);
                     String relType =  relationship.getAttribute("Type");
-                    String relTarget = relationship.getAttribute("Target");
-                    if(relType.equals(RELS_TYPE_COVER)){ coverFilename =  inputPath + "/" + relTarget;}
-                    else if(relType.equals(RELS_TYPE_CORE)){ coreFilename =  inputPath + "/" + relTarget;}
-                    else if(relType.equals(RELS_TYPE_DESCRIPTION)){ descriptionFilename =  inputPath + "/" + relTarget;}
+                    String relTarget = relationship.getAttribute("Target");					
+
+                    if(relType.equals(RELS_TYPE_COVER)){ coverFilename =   relTarget.replaceAll("^/+", "");}
+                    else if(relType.equals(RELS_TYPE_CORE)){ coreFilename =  relTarget.replaceAll("^/+", "");}
+                    else if(relType.equals(RELS_TYPE_DESCRIPTION)){ descriptionFilename =   relTarget.replaceAll("^/+", "");}
 
                 }
             }
-            xmlFile = new File(inputPath + "/" + CONTENT_TYPES_FILENAME);
-            doc = builder.parse(xmlFile);
- 
-            doc.getDocumentElement().normalize();
+
+              doc = parseDocumentFromPath(CONTENT_TYPES_FILENAME);
             
             // Find the "Types" node
              relationships = doc.getElementsByTagName("Types");
@@ -229,13 +241,15 @@ public class DirtyFb3Converter {
                     Element relationship = (Element) relationshipNodes.item(i);
                     String relType =  relationship.getAttribute(ATTR_NAME_CONTENTTYPE);
                     String relTarget = relationship.getAttribute(ATTR_NAME_PARTNAME);
-                    if(relType.equals(CONTENT_TYPE_CORE)){ if(coreFilename == null ) coreFilename =  inputPath + "/" + relTarget;}
-                    else if(relType.equals(CONTENT_TYPE_DESCRIPTION)){  if(descriptionFilename == null ) descriptionFilename =  inputPath + "/" + relTarget;}
-                    else if(relType.equals(CONTENT_TYPE_BODY)){ if(bodyFilename == null ) bodyFilename =  inputPath + "/" + relTarget;}
+
+                    if(relType.equals(CONTENT_TYPE_CORE)){ if(coreFilename == null ) coreFilename =  relTarget.replaceAll("^/+", "");}
+                    else if(relType.equals(CONTENT_TYPE_DESCRIPTION)){  if(descriptionFilename == null ) descriptionFilename =   relTarget.replaceAll("^/+", "");}
+                    else if(relType.equals(CONTENT_TYPE_BODY)){ if(bodyFilename == null ) bodyFilename =   relTarget.replaceAll("^/+", "");}					
                 }
             }
-            if(bodyFilename == null )        bodyFilename =  inputPath + "/" + DEFAULT_BODY_FILENAME;
-            if(descriptionFilename == null ) descriptionFilename =  inputPath + "/" + DEFAULT_DESCRIPTION_FILENAME;
+
+            if(bodyFilename == null )        bodyFilename =   DEFAULT_BODY_FILENAME;
+            if(descriptionFilename == null ) descriptionFilename =  DEFAULT_DESCRIPTION_FILENAME;			
             Path FilePath = Paths.get(bodyFilename);
             String pathToBody = FilePath.getParent().toString();
             relBodyFilename = FilePath.getParent().toString() + "/" + RELS_DIR + "/" +FilePath.getFileName().toString()  + RELS_EXTENSION;  
@@ -247,14 +261,12 @@ public class DirtyFb3Converter {
  
          }
 //Start of formation of fb2 document by copying content from body.xml		 
-    public static Document  StartConvertFb3ToFb2(String inputPath) throws IOException, ParserConfigurationException,SAXException{
+    public static Document  StartConvertFb3ToFb2() throws IOException, ParserConfigurationException,SAXException{
  
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             DocumentBuilder builder = factory.newDocumentBuilder();
 
-            // Loading a document from the file "body.xml"
-            Document document = builder.parse(new File(bodyFilename));
-            document.getDocumentElement().normalize();
+            Document document = parseDocumentFromPath(bodyFilename);
 
             // Getting the root element
             Element fb3RootElement = document.getDocumentElement();
@@ -292,7 +304,7 @@ public class DirtyFb3Converter {
 
     }
 // 	Replacing fb3-specific tags with similar ones in fb2
-    public static void replaceFb3TagsIntoFb2(String inputPath, Document document) throws IOException, ParserConfigurationException,SAXException{
+    public static void replaceFb3TagsIntoFb2( Document document) throws IOException, ParserConfigurationException,SAXException{
 
         NodeList fromChildNodes;
         Node child;
@@ -452,7 +464,6 @@ public class DirtyFb3Converter {
     }
 ///// Getting a list of all images in a document from body.xml.rels
     protected static void loadImages(String ImagePath) {
- 
         File coverFile = null;
         try {
           if(coverFilename != null && coverFilename.length() > 0 ){
@@ -466,13 +477,9 @@ public class DirtyFb3Converter {
             DocumentBuilder builder = factory.newDocumentBuilder();
             
             // Loading XML document
-            File xmlFile = new File(ImagePath);
-    
-            Document doc = builder.parse(xmlFile);
+            Document doc =  parseDocumentFromPath(ImagePath);
             
-            doc.getDocumentElement().normalize();
-            
-            // Find the "Relationships" node
+            // Find the "Relationships" node 
             NodeList relationships = doc.getElementsByTagName(TAG_RELATIONSHIPS);
             String newPath = ImagePath;
             newPath = newPath.replace("\\","/");
@@ -482,7 +489,7 @@ public class DirtyFb3Converter {
             newPath = newPath.substring(0,splitIndex);
             
             if (relationships.getLength() > 0) {
-                // Get the contents of the "Relationships" node
+                // Get the contents of the "Relationships" node 
                 Element relationshipsElement = (Element) relationships.item(0);
                 NodeList relationshipNodes = relationshipsElement.getElementsByTagName(TAG_RELATIONSHIP);
                 
@@ -514,8 +521,10 @@ public class DirtyFb3Converter {
         } catch (Exception e) {
             e.printStackTrace();
         }
+		
 //special treatment for cover image		
         if(coverFile != null && coverRelId ==  null ) {
+ 
           coverRelId = DEFAULT_COVER_FILE_ID;
           imagesMap.put(coverRelId, coverFilename);
           String fileName = coverFile.getName();
@@ -551,9 +560,7 @@ public class DirtyFb3Converter {
 
             //core.xml
                    try{
-                          File xmlFile = new File(coreFilename);
-                          Document docCore = builder.parse(xmlFile);
-                          docCore.getDocumentElement().normalize();
+						    Document docCore = parseDocumentFromPath(coreFilename);
                           Element corePropertiesElement = docCore.getDocumentElement();
 
                           if (corePropertiesElement.getNodeName().equals(TAG_CP_COREPROPERTIES)) { 
@@ -577,9 +584,7 @@ public class DirtyFb3Converter {
                    }
              //description.xml
                    try{
-                          File xmlFile = new File(descriptionFilename);
-                          Document docDescription = builder.parse(xmlFile);
-                          docDescription.getDocumentElement().normalize();
+						  Document docDescription = parseDocumentFromPath(descriptionFilename);
                           Element fb3DescriptionElement = docDescription.getDocumentElement();
 
                           if (fb3DescriptionElement.getNodeName().equals(TAG_FB3_DESCRIPTION)) { 
@@ -683,7 +688,7 @@ public class DirtyFb3Converter {
                               fb3DescriptionChildList = fb3DescriptionElement.getChildNodes( );
                               for (int fb3DescriptionCount = 0; fb3DescriptionCount < fb3DescriptionChildList.getLength(); fb3DescriptionCount++) {
                                   Element fb3DescriptionChild = (Element) fb3DescriptionChildList.item(fb3DescriptionCount);
-// lang  src-lang TAG_LANG
+/////////////////////// lang  src-lang TAG_LANG
                                   if (fb3DescriptionChild.getNodeType() == Node.ELEMENT_NODE && fb3DescriptionChild.getNodeName().equals(TAG_LANG)) {
                                       Element newTiElement = document.createElement(TAG_LANG);
                                       newTiElement.appendChild(document.createTextNode(fb3DescriptionChild.getTextContent()));   
@@ -802,12 +807,10 @@ public class DirtyFb3Converter {
         }
 
     }
-    private static String encodeFileToBase64Binary(String fileName)
-        throws IOException {
-      File file = new File(fileName);
+    private static String encodeFileToBase64Binary(String fileName) throws IOException {
 
       Encoder encoder = Base64.getEncoder();
-      byte[] bytes = loadFile(file);
+        byte[] bytes = readAllBytesFromPath(fileName);
  
 
       return encoder.encodeToString(bytes);
@@ -839,8 +842,103 @@ public class DirtyFb3Converter {
        Path source = Paths.get(fileName);
        return Files.probeContentType(source);
     }
+	
+	
+    private static InputStream openAsStream(String path) throws IOException {
+        return vfs.openStream(path);
+    }
 
+    private static byte[] readAllBytesFromPath(String path) throws IOException {
+        return vfs.readAllBytes(path);
+    }
 
-/////
+    private static Document parseDocumentFromPath(String path) throws IOException, ParserConfigurationException, SAXException {
+        if (!vfs.exists(path)) {
+			System.out.println("File not found: " + path);
+			throw new IOException();
+        }
+ 
+        DocumentBuilder builder = xmlFactory.newDocumentBuilder();
+        try (InputStream is = openAsStream(path)) {
+            Document doc = builder.parse(is);
+            doc.getDocumentElement().normalize();
+            return doc;
+        }
+    }
+////////////////////////////////////////////////////////////////////////////////
+/////////interface VirtualFileSystem
+////////////////////////////////////////////////////////////////////////////////
+    interface VirtualFileSystem {
+        InputStream openStream(String path) throws IOException;
+        byte[] readAllBytes(String path) throws IOException;
+        boolean exists(String path);
+        String getName();
+    }
+	
+////////////////////////////////////////////////////////////////////////////////
+/////////class FileBasedVFS
+////////////////////////////////////////////////////////////////////////////////
+    static class FileBasedVFS implements VirtualFileSystem {
+        private final File baseDir;
+        public FileBasedVFS(File baseDir){ this.baseDir = baseDir; }
+        public File getBaseDir(){ return baseDir; }
+        public InputStream openStream(String path) throws IOException {
+            File f = path.startsWith(baseDir.getPath()) ? new File(path) : new File(baseDir, path);
+            return new FileInputStream(f);
+        }
+        public byte[] readAllBytes(String path) throws IOException {
+            File f = path.startsWith(baseDir.getPath()) ? new File(path) : new File(baseDir, path);
+            return Files.readAllBytes(f.toPath());
+        }
+        public boolean exists(String path){
+            File f = path.startsWith(baseDir.getPath()) ? new File(path) : new File(baseDir, path);
+            return f.exists();
+        }
+        public String getName(){ return baseDir.getAbsolutePath(); }
+    }
+
+////////////////////////////////////////////////////////////////////////////////
+/////////class ZipMemoryVFS
+////////////////////////////////////////////////////////////////////////////////
+    static class ZipMemoryVFS implements VirtualFileSystem {
+        private final Map<String, byte[]> entries = new HashMap<>();
+        private final String name;
+        public ZipMemoryVFS(String name, InputStream zipStream) throws IOException {
+            this.name = name;
+            ZipInputStream zis = new ZipInputStream(zipStream);
+            ZipEntry ze;
+            while((ze = zis.getNextEntry()) != null){
+                if(ze.isDirectory()) { zis.closeEntry(); continue; }
+                String entryName = ze.getName();
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int r;
+                while((r = zis.read(buf)) != -1) baos.write(buf,0,r);
+                entries.put(entryName, baos.toByteArray());
+                zis.closeEntry();
+            }
+            zis.close();
+        }
+        public InputStream openStream(String path) throws IOException {
+            String p = normalize(path);
+            byte[] data = entries.get(p);
+            if(data == null) throw new IOException("File not found in zip: "+path);
+            return new ByteArrayInputStream(data);
+        }
+        public byte[] readAllBytes(String path) throws IOException {
+            String p = normalize(path);
+            byte[] data = entries.get(p);
+            if(data == null) throw new IOException("File not found in zip: "+path);
+            return data;
+        }
+        public boolean exists(String path){ return entries.containsKey(normalize(path)); }
+        private String normalize(String path){
+            String p = path;
+            if(p.startsWith("/")) p = p.substring(1);
+            return p;
+        }
+        public String getName(){ return name; }
+    }
+	
  }
  

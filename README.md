@@ -7,8 +7,9 @@ javac DirtyFb3Converter.java
 ```
 # Usage
 ```
-java DirtyFb3Converter --unzipped_fb3_dir=[fb3_dir] --output=[saved_fb2]
+java DirtyFb3Converter --unzipped_fb3_dir=<fb3_dir>|--fb3_file=<zip> --output=<saved_fb2>
 ```
 Assignment of keys<br/>
 --unzipped_fb3_dir - path to the unzipped book in fb3 format <br/>
+--fb3_file - path to fb3 file (zipped fb3 dir)  <br/>
 --output - path where to save the completed fb2
