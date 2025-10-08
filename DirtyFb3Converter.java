@@ -168,10 +168,10 @@ public class DirtyFb3Converter {
         }
         // Check that the parameters are set
         if (vfs == null || outputFile == null) {
-            System.err.println("Usage: java DirtyFb3Converter --unzipped_fb3_dir=<fb3_dir>|--fb3_file=<zip> --output=<saved_fb2>\n\n"+
-			                   "--unzipped_fb3_dir - path to the unzipped book in fb3 format\n" +
-							   "--fb3_file - path to fb3 file (zipped fb3 dir)\n"+
-							   "--output - path where to save the completed fb2");
+            System.err.println("Usage: java -jar DirtyFb3Converter.jar --unzipped_fb3_dir=<fb3_dir>|--fb3_file=<zip> --output=<saved_fb2>\n\n"+
+								"--unzipped_fb3_dir - path to the unzipped book in fb3 format\n" +
+								"--fb3_file - path to fb3 file (zipped fb3 dir)\n"+
+								"--output - path where to save the completed fb2");
             return;
         }
 
