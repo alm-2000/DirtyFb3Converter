@@ -18,6 +18,7 @@ import org.w3c.dom.NamedNodeMap;
 
 import java.util.Base64;
 import java.util.Base64.Encoder;
+import java.util.HashSet;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.FileInputStream;
@@ -144,6 +145,8 @@ public class DirtyFb3Converter {
     protected static HashMap<String, Boolean> imagesUsedMap = new HashMap<>();
     protected static DocumentBuilderFactory xmlFactory;
     protected static VirtualFileSystem vfs = null;
+	protected static HashMap<String, String> imagePathToId = new HashMap<>();
+	protected static HashMap<String, String> idAliasMap = new HashMap<>();	
 
 
     public static void main(String[] args) throws Exception {
@@ -369,20 +372,30 @@ public class DirtyFb3Converter {
                     boolean doAttrCopy = true;
                     // Create new tags
                     Element toTagElement = document.createElement(toTag);
-                    if(fromTag.equals(TAG_IMG)){
-                       String attrValue =  fromTagElement.getAttribute(ATTR_NAME_SRC);
-                       if(imagesMap.containsKey(attrValue)){
-                          imagesUsedMap.put(attrValue,true);
-                          toTagElement.setAttribute( NAMESPACE_PREFIX_FB2 + ":"+ ATTR_NAME_HREF,"#"+attrValue+"."+imagesExtMap.get(attrValue));
-                       }else{
-                          toTagElement.setAttribute( NAMESPACE_PREFIX_FB2 + ":"+ ATTR_NAME_HREF,"#");
-                       }
-                       doAttrCopy = false;
+					if(fromTag.equals(TAG_IMG)){
+	                    String attrValue = fromTagElement.getAttribute(ATTR_NAME_SRC);
+
+	                    String canonicalId = attrValue;
+	                    if(idAliasMap.containsKey(attrValue)){
+		                    canonicalId = idAliasMap.get(attrValue);
+	                    }
+
+						if(imagesMap.containsKey(attrValue)){
+							imagesUsedMap.put(canonicalId,true);
+
+							toTagElement.setAttribute(
+                                  NAMESPACE_PREFIX_FB2 + ":"+ ATTR_NAME_HREF,
+                                  "#"+canonicalId+"."+imagesExtMap.get(canonicalId)
+                            );
+                        }else{
+                            toTagElement.setAttribute(NAMESPACE_PREFIX_FB2 + ":"+ ATTR_NAME_HREF,"#");
+                        } 
+						doAttrCopy = false;
                     }else if(fromTag.equals(TAG_A)){
                         String attrValue =  fromTagElement.getAttribute(namespacePrefixFb3 + ":"+ ATTR_NAME_HREF);
                         if(attrValue != null)
                             toTagElement.setAttribute( NAMESPACE_PREFIX_FB2 + ":"+ ATTR_NAME_HREF,attrValue);
-                     doAttrCopy = false;
+						doAttrCopy = false;
                     }else if(fromTag.equals(TAG_NOTE)){
                         String attrValue =  fromTagElement.getAttribute( ATTR_NAME_HREF);
                         if(attrValue != null)
@@ -498,8 +511,18 @@ public class DirtyFb3Converter {
                     Element relationship = (Element) relationshipNodes.item(i);
                     String Id =  relationship.getAttribute("Id");
                     String target = relationship.getAttribute("Target");
-                    imagesMap.put(Id, newPath+"/"+ target);
-                    File imgFile = new File(newPath+"/"+ target);
+					String fullPath = newPath + "/" + target;
+
+					imagesMap.put(Id, fullPath);
+
+// determine the canonical ID
+					if(!imagePathToId.containsKey(fullPath)){
+						imagePathToId.put(fullPath, Id);
+					}else{
+						idAliasMap.put(Id, imagePathToId.get(fullPath));
+					}
+
+					File imgFile = new File(fullPath);
                     String fileName = imgFile.getName();
                     splitIndex = fileName.lastIndexOf('.');
                     imagesExtMap.put(Id, (splitIndex == -1) ? "" : fileName.substring(splitIndex+1));
@@ -780,33 +803,59 @@ public class DirtyFb3Converter {
        }        
     }
 //getting the image content
-    public static void insertImagesContent(Document document) throws IOException, ParserConfigurationException,SAXException{
-       Element fb2RootElement = document.getDocumentElement();
+	public static void insertImagesContent(Document document)
+        throws IOException, ParserConfigurationException, SAXException {
 
-       if (fb2RootElement.getNodeName().equals(TAG_FB2_ROOT)) {
+		Element fb2RootElement = document.getDocumentElement();
 
-           for(HashMap.Entry<String, String> currentImageMap : imagesMap.entrySet()) {
-                String imageKey = currentImageMap.getKey();
-                String imagePath = currentImageMap.getValue();
-                if(!imagesUsedMap.containsKey(imageKey)){
-                   continue;
-                }
- 
-                String fileExt = imagesExtMap.get(imageKey);
-                Element binaryElement = document.createElement(TAG_BINARY);
-                binaryElement.appendChild(document.createTextNode(encodeFileToBase64Binary(imagePath)));
-                Attr attr = document.createAttribute(ATTR_NAME_CONTENT_TYPE);
-                attr.setValue(getFileMimetype(imagePath));
-                binaryElement.setAttributeNode(attr);                    
-                attr = document.createAttribute(ATTR_NAME_ID);
-                attr.setValue(imageKey+"."+fileExt);
-                binaryElement.setAttributeNode(attr);                    
-                fb2RootElement.appendChild(binaryElement); 
+		if (fb2RootElement.getNodeName().equals(TAG_FB2_ROOT)) {
 
-            }  
-        }
+			HashSet<String> writtenIds = new HashSet<>();
+	
+			for(HashMap.Entry<String, String> currentImageMap : imagesMap.entrySet()) {
 
-    }
+				String imageKey = currentImageMap.getKey();
+				String imagePath = currentImageMap.getValue();
+
+            // пропускаем alias
+				if(idAliasMap.containsKey(imageKey)){
+                continue;
+            }
+
+            // только реально используемые
+				if(!imagesUsedMap.containsKey(imageKey)){
+					continue;
+				}
+
+            // защита от дублей
+				if(writtenIds.contains(imageKey)){
+					continue;
+				}
+
+				writtenIds.add(imageKey);
+
+				String fileExt = imagesExtMap.get(imageKey);
+
+				Element binaryElement = document.createElement(TAG_BINARY);
+
+				binaryElement.appendChild(
+					document.createTextNode(
+						encodeFileToBase64Binary(imagePath)
+					)
+				);
+
+				Attr attr = document.createAttribute(ATTR_NAME_CONTENT_TYPE);
+				attr.setValue(getFileMimetype(imagePath));
+				binaryElement.setAttributeNode(attr);
+
+				attr = document.createAttribute(ATTR_NAME_ID);
+				attr.setValue(imageKey + "." + fileExt);
+				binaryElement.setAttributeNode(attr);
+
+				fb2RootElement.appendChild(binaryElement);
+			}
+		}
+	}
     private static String encodeFileToBase64Binary(String fileName) throws IOException {
 
       Encoder encoder = Base64.getEncoder();
