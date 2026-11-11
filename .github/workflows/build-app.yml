@@ -1,0 +1,49 @@
+name: Build DirtyFb3Converter
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Java application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Show Java version
+        run: |
+          java -version
+          javac -version
+
+      - name: Clean and build
+        run: make clean all
+
+      - name: Verify JAR
+        run: |
+          test -f DirtyFb3Converter.jar
+          jar tf DirtyFb3Converter.jar
+          unzip -p DirtyFb3Converter.jar META-INF/MANIFEST.MF
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DirtyFb3Converter
+          path: DirtyFb3Converter.jar
+          if-no-files-found: error
